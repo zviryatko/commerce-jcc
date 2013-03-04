@@ -1,0 +1,4 @@
+name = Commerce JCC
+description = JCC gateway for drupal commerce
+core = 7.x
+dependencies[] = commerce_payment
