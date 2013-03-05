@@ -16,7 +16,6 @@ function commerce_jcc_default_settings() {
     'MerID' => '',
     'AcqID' => '',
     'MerRespURL' => url('commerce_jcc/process', array('absolute' => TRUE, 'https' => TRUE)),
-    'PurchaseCurrency' => 978,
     'PurchaseCurrencyExponent' => 2,
     'CaptureFlag' => 'A',
     'Password' => '',
@@ -72,21 +71,11 @@ function commerce_jcc_settings_form($settings = array()) {
     '#element_validate' => array('_commerce_jcc_validate_responce_url'),
     '#disabled' => TRUE,
   );
-  // todo: change to select list with all possible currency value
-  $form['PurchaseCurrency'] = array(
-    '#type' => 'textfield',
-    '#title' => t("Purchase currency"),
-    '#default_value' => $settings['PurchaseCurrency'],
-    '#element_validate' => array('element_validate_integer_positive'),
-    '#maxlength' => 3,
-    '#desctiptions' => "The ISO code for the currency of the transaction; the value specified needs to be the ISO code corresponding to one of the currencies supported by JCC’s payment gateway – see relevant Appendix for details.",
-  );
   $form['PurchaseCurrencyExponent'] = array(
-    '#type' => 'textfield',
+    '#type' => 'select',
     '#title' => t("Purchase currency exponent"),
     '#default_value' => $settings['PurchaseCurrencyExponent'],
-    '#element_validate' => array('element_validate_integer_positive'),
-    '#maxlength' => 1,
+    '#options' => drupal_map_assoc( array( 1, 2, 3, 4)),
     '#description' => "The number of decimal digits of the purchase currency; can be 0, 2 or 3.",
   );
   $form['CaptureFlag'] = array(
@@ -146,10 +135,13 @@ function commerce_jcc_order_form($form, &$form_state, $order, $settings) {
   $wrapper = entity_metadata_wrapper('commerce_order', $order);
   $amount = $wrapper->commerce_order_total->amount->value();
 
-  $formattedPurchaseAmt = commerce_jcc_format_amount($amount, $settings['PurchaseCurrencyExponent']);
+  $currency_code = $wrapper->commerce_order_total->currency_code->value();
+  $currency = commerce_currency_load($currency_code);
+
+  $formattedPurchaseAmt = commerce_jcc_format_amount($amount);
   //Form the plaintext string to encrypt by concatenating Password, Merchant ID, Acquirer ID, Order ID, Formatter Purchase Amount and Currency
   //This will give 1234abcd | 0011223344 | 402971 | TestOrder12345 | 000000002050 | 978 (spaces and | introduced here for clarity)
-  $toEncrypt = $settings['Password'].$settings['MerID'].$settings['AcqID'].$order->order_id.$formattedPurchaseAmt.$settings['PurchaseCurrency'];
+  $toEncrypt = $settings['Password'].$settings['MerID'].$settings['AcqID'].$order->order_id.$formattedPurchaseAmt.$currency['numeric_code'];
   //Produce the hash using SHA1
   //This will give b14dcc7842a53f1ec7a621e77c106dfbe8283779
   $sha1Signature = sha1($toEncrypt);
@@ -163,7 +155,7 @@ function commerce_jcc_order_form($form, &$form_state, $order, $settings) {
     'AcqID' => $settings['AcqID'],
     'MerRespURL' => $settings['MerRespURL'],
     'PurchaseAmt' => $formattedPurchaseAmt,
-    'PurchaseCurrency' => $settings['PurchaseCurrency'],
+    'PurchaseCurrency' => $currency['numeric_code'],
     'PurchaseCurrencyExponent' => $settings['PurchaseCurrencyExponent'],
     'OrderID' => $order->order_id,
     'CaptureFlag' => $settings['CaptureFlag'],
@@ -207,7 +199,6 @@ function commerce_jcc_server_url($server) {
  * Formate amount
  *
  * @param float $amount
- * @param int $exponent
  *
  * @return int
  */

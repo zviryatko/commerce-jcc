@@ -19,71 +19,9 @@ function commerce_jcc_menu() {
 }
 
 /**
- * Define payment methods available to the Commerce Payment framework.
+ * Implements of hook_commerce_payment_method_info()
  *
- * The Payment module uses this hook to gather information on payment methods
- * defined by enabled modules.
- *
- * Payment methods depend on a variety of callbacks that are used to configure
- * the payment methods via Rules actions, integrate the payment method with the
- * checkout form, handle display and manipulation of transactions after the fact,
- * and allow for administrative payment entering after checkout. The Payment
- * module ships with payment method modules useful for testing and learning, but
- * all integrations with real payment providers will be provided as contributed
- * modules. The Payment module will include helper code designed to make different
- * types of payment services easier to integrate as mentioned above.
- *
- * Each payment method is an associative array with the following keys:
- *  - method_id: string identifying the payment method (must be a valid PHP
- *    identifier).
- *  - base (optional): string used as the base for callback names, each of which
- *    will be defaulted to [base]_[callback] unless explicitly set; defaults
- *    to the method_id if not set.
- *  - title: the translatable full title of the payment method, used in
- *    administrative interfaces.
- *  - display_title (optional): the title to display on forms where the payment
- *    method is selected and may include HTML for methods that require images and
- *    special descriptions; defaults to the title.
- *  - short_title (optional): an abbreviated title that may simply include the
- *    payment provider’s name as it makes sense to the customer (i.e. you would
- *    display PayPal, not PayPal WPS to a customer); defaults to the title.
- *  - description (optional): a translatable description of the payment method,
- *    including the nature of the payment and the payment gateway that actually
- *    captures the payment.
- *  - active (optional): TRUE of FALSE indicating whether or not the default
- *    payment method rule configuration for this payment method should be
- *    enabled by default; defaults to FALSE.
- *  - terminal (optional): TRUE or FALSE indicating whether or not payments can
- *    be processed via this payment method through the administrative payment
- *    terminal on an order’s Payment tab; defaults to TRUE.
- *  - offsite (optional): TRUE or FALSE indicating whether or not the customer
- *    must be redirected offsite to put in their payment information; used
- *    specifically by the off-site payment redirect checkout pane; defaults to
- *    FALSE.
- *  - offsite_autoredirect (optional): TRUE or FALSE indicating whether or not
- *    the customer should be automatically redirected to an offsite payment site
- *    on the payment step of checkout; defaults to FALSE.
- *  - callbacks (optional): an array of callback function names for the various
- *    types of callback required for all the payment method operations, arguments
- *    per callback in parentheses:
- *      - settings_form: the name of the CALLBACK_commerce_payment_method_settings_form()
- *        of the payment method.
- *      - submit_form: the name of the CALLBACK_commerce_payment_method_submit_form()
- *        of the payment method.
- *      - submit_form_validate: the name of the CALLBACK_commerce_payment_method_submit_form_validate()
- *        of the payment method.
- *      - submit_form_submit: the name of the CALLBACK_commerce_payment_method_submit_form_submit()
- *        of the payment method.
- *      - redirect_form: the name of the CALLBACK_commerce_payment_method_redirect_form()
- *        of the payment method.
- *      - redirect_form_validate: the name of the CALLBACK_commerce_payment_method_redirect_form_validate()
- *        of the payment method.
- *      - redirect_form_submit: the name of the CALLBACK_commerce_payment_method_redirect_form_submit()
- *        of the payment method.
- *  - file (optional): the filepath of an include file relative to the method's
- *    module containing the callback functions for this method, allowing modules
- *    to store payment method code in include files that only get loaded when
- *    necessary (like the menu item file property).
+ * @see hook_commerce_payment_method_info()
  *
  * @return
  *   An array of payment methods, using the format defined above.
@@ -104,16 +42,42 @@ function commerce_jcc_commerce_payment_method_info() {
 
 // todo: move to another file
 function commerce_jcc_result_page() {
-  if (isset($_POST)) {
+  if (isset($_POST['OrderID']) && $order = commerce_order_load((int) $_POST['OrderID'])) {
+    $wrapper = entity_metadata_wrapper('commerce_order', $order);
+    $transaction = commerce_payment_transaction_new('jcc', $order->order_id);
+
+    // todo: status & message dont set =(
+    if (!isset($_POST['ResponseCode']) && !isset($_POST['ReasonCode'])) {
+      $transaction->status = COMMERCE_PAYMENT_STATUS_FAILURE;
+      drupal_set_message('No POST');
+      $transaction->message = t('No POST data received');
+    } elseif ($_POST['ResponseCode'] == 1 && $_POST['ReasonCode'] == 1) {
+      $transaction->status = 'completed';
+      drupal_set_message('Completed');
+      $transaction->message = t('Payment succeeded with message: %message', array('%message' => $_POST['ReasonCodeDesc']));
+    } else {
+      // todo: create reason codes list and return them from pdf Appendix B
+      $transaction->status = 'canceled';
+      drupal_set_message('Canceled');
+      $transaction->message = t('Payment failed with code %code and message: %message', array('%code' => $_POST['ReasonCode'], '%message' => $_POST['ReasonCodeDesc']));
+    }
+
+    $amount = $wrapper->commerce_order_total->amount->value();
+    $currency = $wrapper->commerce_order_total->currency_code->value();
+    $transaction->amount = $amount;
+    $transaction->currency_code = $currency;
+
+    commerce_payment_transaction_save($transaction);
+
     $output = '';
-    watchdog('commerce_jcc', 'Process succes, request: <pre>!request</pre>', array('!request' => '<pre>' . check_plain(print_r($_POST, TRUE)) . '</pre>'), WATCHDOG_DEBUG);
-    dpm($_POST);
-    if (isset($_POST['ResponseCode']))
-      $output .= check_plain($_POST['ReasonCodeDesc']);
+    if (isset($_POST['ResponseCode'])) {
+      dpm($_POST);
+      $output .= t('Payment failed with code %code and message: %message', array('%code' => $_POST['ReasonCode'], '%message' => $_POST['ReasonCodeDesc']));
+    }
     return $output;
   }
   drupal_not_found();
-  return;
+  return NULL;
 }
 
 function _commerce_jcc_validate_responce_url($element, &$form_state) {
